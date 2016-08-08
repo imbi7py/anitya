@@ -409,7 +409,6 @@ class AnityaWebAPItests(Modeltests):
 
     def test_api_get_project_by_ecosystem(self):
         """ Test the api_get_project_ecosystem function of the API. """
-        create_distro(self.session)
         output = self.app.get('/api/by_ecosystem/pypi/pypi_and_npm')
         self.assertEqual(output.status_code, 404)
         data = _read_json(output)
@@ -452,6 +451,89 @@ class AnityaWebAPItests(Modeltests):
         }
 
         self.assertEqual(data, exp)
+
+
+    def test_api_add_project_in_ecosystem(self):
+        output = self.app.get('/api/by_ecosystem/pypi/six/')
+        self.assertEqual(output.status_code, 404)
+        data = _read_json(output)
+
+        exp = {
+            "error": 'No project "six" found in ecosystem "pypi"',
+            "output": "notok"
+        }
+        self.assertEqual(data, exp)
+
+        project_data = json.dumps({
+            "name": "six"
+        })
+        output = self.app.post('/api/by_ecosystem/pypi/',
+                               data = project_data,
+                               content_type = 'application/json')
+        self.assertEqual(output.status_code, 201)
+        expected = {
+            "id": 1,
+            "backend": "PyPI",
+            "homepage": "https://release-monitoring.org/api/by_ecosystem/pypi/six",
+            "name": "six",
+            "regex": None,
+            "version": None,
+            "version_url": None,
+            "versions": [],
+            "packages": [],
+        }
+        data = _read_json(output)
+        del(data['created_on'])
+        del(data['updated_on'])
+        self.assertEqual(data, expected)
+
+        output = self.app.post('/api/by_ecosystem/pypi/',
+                               data = project_data,
+                               content_type = 'application/json')
+        self.assertEqual(output.status_code, 200)
+        data = _read_json(output)
+        del(data['created_on'])
+        del(data['updated_on'])
+        self.assertEqual(data, expected)
+
+        projects = model.Project.all(self.session, count=True)
+        self.assertEqual(projects, 1)
+
+    def test_api_add_upstream_downstream_mapping(self):
+        project_data = json.dumps({
+            "name": "six"
+        })
+        output = self.app.post('/api/by_ecosystem/pypi/',
+                               data = project_data,
+                               content_type = 'application/json')
+        self.assertEqual(output.status_code, 201)
+
+        # Check adding the mapping (with implicit distro creation)
+        downstream_data = json.dumps({
+            "distro": "Fedora",
+            "package_name": "python-six",
+        })
+        output = self.app.post('/api/downstreams/pypi/six/',
+                               data = downstream_data,
+                               content_type = 'application/json')
+        self.assertEqual(output.status_code, 201)
+        expected = {
+            'total': 1,
+            'downstreams': [
+                {
+                    "distro": "Fedora",
+                    "package_name": "python-six",
+                }
+            ]
+        }
+        data = _read_json(output)
+        self.assertEqual(data, expected)
+
+        # Check retrieving the mapping
+        output = self.app.get('/api/downstreams/pypi/six/')
+        self.assertEqual(output.status_code, 200)
+        data = _read_json(output)
+        self.assertEqual(data, expected)
 
 if __name__ == '__main__':
     SUITE = unittest.TestLoader().loadTestsFromTestCase(AnityaWebAPItests)

@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 
 import flask
+from werkzeug.exceptions import BadRequest
 
 import anitya
 import anitya.lib.plugins
@@ -553,10 +554,10 @@ def api_get_project_distro(distro, package_name):
 
 @APP.route('/api/by_ecosystem/<ecosystem>/<project_name>/', methods=['GET'])
 @APP.route('/api/by_ecosystem/<ecosystem>/<project_name>', methods=['GET'])
-def api_get_project_ecosystem(ecosystem, project_name):
+def api_get_project_in_ecosystem(ecosystem, project_name):
     '''
     Retrieve a project from a given ecosystem
-    -------------------------------
+    -----------------------------------------
     Retrieves a project in an ecosystem via the name of the ecosystem
     and the name of the project as registered with Anitya.
 
@@ -609,6 +610,183 @@ def api_get_project_ecosystem(ecosystem, project_name):
     else:
         output = project.__json__(detailed=True)
         httpcode = 200
+
+    jsonout = flask.jsonify(output)
+    jsonout.status_code = httpcode
+    return jsonout
+
+
+@APP.route('/api/by_ecosystem/<ecosystem>/', methods=['POST'])
+@APP.route('/api/by_ecosystem/<ecosystem>', methods=['POST'])
+def api_add_project_in_ecosystem(ecosystem):
+    '''
+    Starts monitoring a project in the given ecosystem
+    --------------------------------------------------
+    Adds a new project in the given ecosystem to the set monitored by Anitya.
+    '''
+    ecosystem_ref = anitya.lib.model.Ecosystem.by_name(SESSION, ecosystem)
+
+    if not ecosystem:
+        output = {
+            'output': 'notok',
+            'error': 'Unknown ecosystem "%s"' % (ecosystem)
+        }
+        httpcode = 404
+    else:
+
+        data = None
+        try:
+            data = flask.request.get_json()
+            # TODO: Validate the input data properly
+            project_name = data['name'].strip()
+            # TODO: Allow an external home page to be set
+            homepage = None
+            # TODO: Allow check_release to be set
+            check_release = False
+        except (BadRequest, TypeError, KeyError):
+            output = {
+                'output': 'notok',
+                'error': 'Malformed input data'
+            }
+            httpcode = 400
+        else:
+            project = anitya.lib.model.Project.by_name_and_ecosystem(
+                SESSION, project_name, ecosystem)
+            if project is not None:
+                httpcode = 200
+            else:
+                user_id = getattr(flask.g.auth, 'openid',
+                                  'noreply@fedoraproject.org')
+                project = anitya.lib.create_project_in_ecosystem(
+                    SESSION,
+                    name=project_name,
+                    ecosystem=ecosystem_ref,
+                    homepage=homepage,
+                    user_id=user_id,
+                    check_release=check_release,
+                )
+                httpcode = 201
+            output = project.__json__(detailed=True)
+
+    jsonout = flask.jsonify(output)
+    jsonout.status_code = httpcode
+    return jsonout
+
+
+@APP.route('/api/downstreams/<ecosystem>/<project_name>/', methods=['GET'])
+@APP.route('/api/downstreams/<ecosystem>/<project_name>', methods=['GET'])
+def api_get_project_downstreams(ecosystem, project_name):
+    '''
+    Retrieve the downstream packages for a given project
+    ----------------------------------------------------
+    Retrieves the downstream packages for a project via the name of the
+    ecosystem and the name of the project as registered with Anitya.
+
+    ::
+
+        /api/downstreams/<ecosystem>/<project_name>
+
+    Accepts GET and POST queries.
+
+    :arg ecosystem: the name of the ecosystem (case insensitive).
+    :arg project_name: the name of the project in Anitya.
+
+    Sample GET response:
+
+    ::
+
+      {
+        "total": 1,
+        "downstreams": [
+          {
+            "distro": "Fedora",
+            "package_name": "python-six"
+          }
+        ]
+      }
+
+    '''
+
+    project = anitya.lib.model.Project.by_name_and_ecosystem(
+        SESSION, project_name, ecosystem)
+
+    if not project:
+        output = {
+            'output': 'notok',
+            'error': 'No project "%s" found in ecosystem "%s"' % (
+                project_name, ecosystem)}
+        httpcode = 404
+
+    else:
+        print(project.packages)
+        packages = project.__json__(detailed=True)['packages']
+        output = {
+            'total': len(packages),
+            'downstreams': packages
+        }
+        httpcode = 200
+
+    jsonout = flask.jsonify(output)
+    jsonout.status_code = httpcode
+    return jsonout
+
+
+@APP.route('/api/downstreams/<ecosystem>/<project_name>/', methods=['POST'])
+@APP.route('/api/downstreams/<ecosystem>/<project_name>', methods=['POST'])
+def api_link_project_downstream(ecosystem, project_name):
+    '''
+    Link an upstream project to a downstream package
+    ------------------------------------------------
+    '''
+    project = anitya.lib.model.Project.by_name_and_ecosystem(
+        SESSION, project_name, ecosystem)
+
+    if not project:
+        output = {
+            'output': 'notok',
+            'error': 'No project "%s" found in ecosystem "%s"' % (
+                project_name, ecosystem)
+        }
+        httpcode = 404
+    else:
+
+        data = None
+        try:
+            data = flask.request.get_json()
+            distro = data['distro']
+            package_name = data['package_name']
+        except (BadRequest, TypeError, KeyError):
+            output = {
+                'output': 'notok',
+                'error': 'Malformed input data'
+            }
+            httpcode = 400
+        else:
+            package = anitya.lib.model.Packages.by_package_name_distro(
+                SESSION, package_name, distro)
+            if package is not None:
+                httpcode = 200
+            else:
+                user_id = getattr(flask.g.auth, 'openid',
+                                  'noreply@fedoraproject.org')
+                # NOTE: map_project implicitly creates new distros, which
+                # isn't very resilient against typos in messages from clients
+                package = anitya.lib.map_project(
+                    SESSION,
+                    project=project,
+                    package_name=package_name,
+                    distribution=distro,
+                    user_id=user_id
+                )
+                # Unlike the create_* helpers, map_project currently needs
+                # an explicit commit following the call
+                SESSION.commit()
+                httpcode = 201
+            packages = project.__json__(detailed=True)['packages']
+            output = {
+                'total': len(packages),
+                'downstreams': packages
+            }
 
     jsonout = flask.jsonify(output)
     jsonout.status_code = httpcode

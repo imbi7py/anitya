@@ -43,7 +43,7 @@ class AnityaLibtests(Modeltests):
     """ AnityaLib tests. """
 
     def test_create_project(self):
-        """ Test the create_project function of Distro. """
+        """ Test the create_project helper function """
         create_distro(self.session)
         self.assertEqual(2, model.Distro.all(self.session, count=True))
 
@@ -76,6 +76,35 @@ class AnityaLibtests(Modeltests):
         self.assertEqual(len(project_objs), 1)
         self.assertEqual(project_objs[0].name, 'geany')
         self.assertEqual(project_objs[0].homepage, 'http://www.geany.org/')
+
+    def test_create_project_in_ecosystem(self):
+        ecosystem = anitya.lib.model.Ecosystem.by_name(self.session, "pypi")
+        anitya.lib.create_project_in_ecosystem(
+            self.session,
+            name='six',
+            ecosystem=ecosystem,
+            user_id='noreply@fedoraproject.org',
+        )
+
+        project_objs = anitya.lib.model.Project.all(self.session)
+        self.assertEqual(len(project_objs), 1)
+        self.assertEqual(project_objs[0].name, 'six')
+        self.assertEqual(project_objs[0].ecosystem.name, 'pypi')
+        expected_url = 'https://release-monitoring.org/api/by_ecosystem/pypi/six'
+        self.assertEqual(project_objs[0].homepage, expected_url)
+
+        self.assertRaises(
+            AnityaException,
+            anitya.lib.create_project_in_ecosystem,
+            self.session,
+            name='six',
+            ecosystem=ecosystem,
+            user_id='noreply@fedoraproject.org',
+        )
+
+        project_objs = anitya.lib.model.Project.all(self.session)
+        self.assertEqual(len(project_objs), 1)
+        self.assertEqual(project_objs[0].name, 'six')
 
     def test_edit_project(self):
         """ Test the edit_project function of Distro. """

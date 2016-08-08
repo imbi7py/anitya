@@ -80,12 +80,42 @@ def create_project(
         session, name, homepage, user_id, backend='custom',
         version_url=None, version_prefix=None, regex=None,
         check_release=False):
-    """ Create the project in the database.
-
-    """
+    """ Create a new project given its name and homepage URL """
     # Set the ecosystem if there's one associated with the given backend
     backend_ref = anitya.lib.model.Backend.by_name(session, name=backend)
     ecosystem_ref = backend_ref.default_ecosystem
+    return _store_new_project(
+        session, name, homepage, user_id, backend,
+        version_url, version_prefix, regex, check_release,
+        ecosystem_ref
+    )
+
+def create_project_in_ecosystem(
+        session, name, ecosystem, user_id, homepage=None,
+        version_url=None, version_prefix=None, regex=None,
+        check_release=False):
+    """ Create a new project given a name and upstream ecosystem """
+    # Set the backend if there's one associated with the given ecosystem
+    backend = None
+    if ecosystem.default_backend is not None:
+        backend = ecosystem.default_backend.name
+
+    if homepage is None:
+        url_pattern = "https://release-monitoring.org/api/by_ecosystem/{}/{}"
+        homepage = url_pattern.format(ecosystem.name, name)
+
+    return _store_new_project(
+        session, name, homepage, user_id, backend,
+        version_url, version_prefix, regex, check_release,
+        ecosystem
+    )
+
+
+def _store_new_project(
+        session, name, homepage, user_id, backend,
+        version_url, version_prefix, regex, check_release,
+        ecosystem_ref):
+    """Internal helper to store new projects in the DB"""
 
     project = anitya.lib.model.Project(
         name=name,
